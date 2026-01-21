@@ -1,0 +1,54 @@
+name: Run PDB2PQR
+
+on:
+  repository_dispatch:
+    types: [run-pdb2pqr]
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+
+    # 1. Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # 2. Install PDB2PQR (It's on PyPI!)
+    - name: Install PDB2PQR
+      run: |
+        pip install pdb2pqr
+        pip install numpy requests
+
+    # 3. Run the Conversion
+    - name: Run PDB2PQR
+      run: |
+        # Get inputs from the trigger payload
+        PDB_ID="${{ github.event.client_payload.pdb_id }}"
+        FF="${{ github.event.client_payload.force_field }}"
+        PH="${{ github.event.client_payload.ph }}"
+
+        echo "Running PDB2PQR for $PDB_ID with $FF at pH $PH..."
+
+        # Run the tool
+        # --ff: Forcefield (AMBER, CHARMM, PARSE)
+        # --titration-state-method=propka: Calculate pKa values
+        # --with-ph: Set pH for titration
+        pdb2pqr --ff=$FF --titration-state-method=propka --with-ph=$PH --pdb-output=$PDB_ID.pdb $PDB_ID results/output.pqr
+
+        # Create a metadata file so the frontend knows we are done
+        echo "{\"status\": \"completed\", \"pdb\": \"$PDB_ID\", \"timestamp\": \"$(date +%s)\"}" > results/status.json
+
+    # 4. Commit the Output (.pqr file) back to the repo
+    - name: Save Results
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "PDB2PQR Result for ${{ github.event.client_payload.pdb_id }}"
+        file_pattern: "results/*"
