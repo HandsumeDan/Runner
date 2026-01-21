@@ -1,0 +1,79 @@
+name: Molecular Electrostatics Pipeline
+
+on:
+  repository_dispatch:
+    types: [run-calculation]
+
+permissions:
+  contents: write
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+
+    # 1. Install Chemistry Software
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y apbs
+        pip install pdb2pqr numpy requests
+
+    # 2. Run PDB2PQR (Prepare the structure)
+    - name: Run PDB2PQR
+      run: |
+        echo "Running PDB2PQR..."
+        # We assume the uploaded file is saved as 'upload.pdb' in the root
+        # Using AMBER forcefield and pH 7.0
+        pdb2pqr --ff=AMBER --titration-state-method=propka --with-ph=7.0 --pdb-output=result.pdb upload.pdb result.pqr
+
+    # 3. Create APBS Input File
+    - name: Generate APBS Config
+      run: |
+        echo "
+        read
+            mol pqr result.pqr
+        end
+        elec
+            mg-manual
+            dime 97 97 97
+            cgcent mol 1
+            fgcent mol 1
+            mol 1
+            lpbe
+            bcfl sdh
+            pdie 2.0
+            sdie 78.54
+            chgm spl2
+            srfm smol
+            swin 0.3
+            srad 1.4
+            sdens 10.0
+            temp 298.15
+            calcenergy total
+            calcforce no
+            write pot dx result
+        end
+        quit
+        " > apbs.in
+
+    # 4. Run APBS (The Heavy Math)
+    - name: Run APBS
+      run: |
+        echo "Running APBS..."
+        apbs apbs.in > apbs.log
+
+    # 5. Notify Completion (Create a status file)
+    - name: Finalize
+      run: |
+        echo "{\"status\": \"completed\", \"timestamp\": \"$(date +%s)\"}" > status.json
+
+    # 6. Save All Results back to Repo
+    - name: Commit Results
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Calculation Results for Job"
+        file_pattern: "result.pqr result.dx status.json"
